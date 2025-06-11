@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>游戏币 ↔ RMB 换算工具</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 30px;
+      max-width: 600px;
+      margin: auto;
+    }
+    input, select, button {
+      padding: 8px;
+      font-size: 16px;
+      margin-bottom: 15px;
+    }
+    input, select {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    .row input {
+      flex: 2;
+    }
+    .row select {
+      flex: 1;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-bottom: 6px;
+    }
+    #rate-display {
+      color: #409EFF;
+      font-weight: bold;
+      margin-bottom: 20px;
+      display: block;
+    }
+    button {
+      width: 48%;
+      cursor: pointer;
+      background-color: #409EFF;
+      border: none;
+      color: white;
+      border-radius: 4px;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #66b1ff;
+    }
+    .btn-group {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    #log {
+      border-top: 1px solid #ccc;
+      padding-top: 15px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 14px;
+      color: #333;
+    }
+    #log h3 {
+      margin-bottom: 10px;
+    }
+    .log-entry {
+      margin-bottom: 8px;
+      padding-bottom: 5px;
+      border-bottom: 1px dashed #ddd;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>🎮 游戏币 ↔ 💰 RMB 换算工具</h2>
+
+  <span id="rate-display">💱 实际汇率：1 RMB = 560000 游戏币</span>
+
+  <label for="rateBase">设置汇率（基础值 + 单位）：</label>
+  <div class="row">
+    <input type="number" id="rateBase" value="56" step="any" />
+    <select id="rateUnit">
+      <option value="1">无单位</option>
+      <option value="10000" selected>万 (W)</option>
+      <option value="100000000">亿 (E)</option>
+    </select>
+  </div>
+
+  <label for="decimalPlaces">小数位数（保留多少位小数）：</label>
+  <input type="number" id="decimalPlaces" value="2" min="0" max="10" step="1" />
+
+  <!-- 游戏币数量部分 -->
+  <label for="game">🎮 游戏币数量：</label>
+  <div class="row">
+    <input type="number" id="game" placeholder="输入游戏币数量" step="any" />
+    <select id="gameUnit">
+      <option value="10000" selected>万 (W)</option>
+      <option value="1">无单位</option>
+      <option value="100000000">亿 (E)</option>
+    </select>
+  </div>
+
+  <label for="rmb">💵 RMB 金额：</label>
+  <input type="number" id="rmb" placeholder="输入人民币金额" step="any" />
+
+  <div class="btn-group">
+    <button id="calcFromGame">用游戏币计算 RMB</button>
+    <button id="calcFromRMB">用 RMB 计算游戏币</button>
+  </div>
+
+  <!-- 计算记录显示区 -->
+  <div id="log">
+    <h3>📝 计算记录</h3>
+  </div>
+
+  <script>
+    const rateBase = document.getElementById('rateBase');
+    const rateUnit = document.getElementById('rateUnit');
+    const decimalPlacesInput = document.getElementById('decimalPlaces');
+    const gameInput = document.getElementById('game');
+    const gameUnit = document.getElementById('gameUnit');
+    const rmbInput = document.getElementById('rmb');
+    const rateDisplay = document.getElementById('rate-display');
+    const logDiv = document.getElementById('log');
+
+    function getRate() {
+      const base = parseFloat(rateBase.value);
+      const unit = parseFloat(rateUnit.value);
+      if (isNaN(base) || isNaN(unit)) return 0;
+      return base * unit;
+    }
+
+    function getDecimalPlaces() {
+      const val = parseInt(decimalPlacesInput.value);
+      if (isNaN(val) || val < 0) return 2;
+      if (val > 10) return 10; // 最大限制10位
+      return val;
+    }
+
+    function getGameValue() {
+      const val = parseFloat(gameInput.value);
+      const unit = parseFloat(gameUnit.value);
+      if (isNaN(val) || isNaN(unit)) return 0;
+      return val * unit;
+    }
+
+    function setGameValue(realValue) {
+      const unit = parseFloat(gameUnit.value) || 10000; // 默认单位万
+      const decimals = getDecimalPlaces();
+      // 不自动换单位，直接用当前单位计算显示
+      gameInput.value = (realValue / unit).toFixed(decimals);
+    }
+
+    function getRMBValue() {
+      const val = parseFloat(rmbInput.value);
+      if (isNaN(val)) return 0;
+      return val;
+    }
+
+    function setRMBValue(val) {
+      const decimals = getDecimalPlaces();
+      rmbInput.value = val.toFixed(decimals);
+    }
+
+    function updateDisplayRate() {
+      const rate = getRate();
+      rateDisplay.textContent = `💱 实际汇率：1 RMB = ${rate.toLocaleString()} 游戏币`;
+    }
+
+    // 新增：追加一条日志
+    function appendLog(message) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = message;
+      logDiv.appendChild(entry);
+      // 滚动到底部
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function calculateRMBFromGame() {
+      const rate = getRate();
+      if (rate === 0) {
+        alert('请先设置有效汇率！');
+        return;
+      }
+      const game = getGameValue();
+      if (game === 0) {
+        setRMBValue(0);
+        return;
+      }
+      const rmb = game / rate;
+      setRMBValue(rmb);
+
+      // 追加计算记录
+      const decimals = getDecimalPlaces();
+      appendLog(`汇率：1 RMB = ${rate.toLocaleString()} 游戏币；用游戏币 ${gameInput.value} ${gameUnit.options[gameUnit.selectedIndex].text} 计算，得出 RMB ${rmb.toFixed(decimals)}`);
+    }
+
+    function calculateGameFromRMB() {
+      const rate = getRate();
+      if (rate === 0) {
+        alert('请先设置有效汇率！');
+        return;
+      }
+      const rmb = getRMBValue();
+      if (rmb === 0) {
+        gameInput.value = '';
+        return;
+      }
+      const game = rmb * rate;
+      setGameValue(game);
+
+      // 追加计算记录
+      const decimals = getDecimalPlaces();
+      appendLog(`汇率：1 RMB = ${rate.toLocaleString()} 游戏币；用 RMB ${rmbInput.value} 计算，得出游戏币 ${gameInput.value} ${gameUnit.options[gameUnit.selectedIndex].text}`);
+    }
+
+    function onRateChange() {
+      updateDisplayRate();
+    }
+
+    rateBase.addEventListener('input', onRateChange);
+    rateUnit.addEventListener('change', onRateChange);
+
+    document.getElementById('calcFromGame').addEventListener('click', calculateRMBFromGame);
+    document.getElementById('calcFromRMB').addEventListener('click', calculateGameFromRMB);
+
+    updateDisplayRate();
+  </script>
+
+</body>
+</html>

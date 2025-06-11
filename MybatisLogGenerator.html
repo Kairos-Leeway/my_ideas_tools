@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8">
+    <title>MyBatis SQL 拼接工具</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        display: flex;
+        height: 100vh;
+      }
+
+      .sidebar {
+        width: 300px;
+        background: #f2f2f2;
+        padding: 10px;
+        border-right: 1px solid #ccc;
+        overflow-y: auto;
+        transition: transform 0.3s ease;
+        position: relative;
+      }
+
+      .sidebar.collapsed {
+        transform: translateX(-100%);
+      }
+
+      .sidebar h3 {
+        margin-top: 0;
+      }
+
+      .sidebar button {
+        width: 100%;
+      }
+
+      .history-item {
+        position: relative;
+        background: #fff;
+        border: 1px solid #ccc;
+        margin-bottom: 8px;
+        padding: 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .history-item.selected {
+        border: 2px solid #4CAF50;
+        background: #e8ffe8;
+      }
+
+      .history-title {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .history-item .delete-btn {
+        width: 20px;
+        position: absolute;
+        right: 5px;
+        top: 5px;
+        font-size: 12px;
+        color: red;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+      }
+
+      .remark-row {
+        display: flex;
+        gap: 5px;
+        margin-top: 5px;
+      }
+
+      .remark-row input {
+        flex: 1;
+        font-size: 12px;
+      }
+
+      .main {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+      }
+
+      textarea {
+        width: 100%;
+        height: 100px;
+        font-size: 14px;
+        margin-bottom: 10px;
+      }
+
+      pre {
+        background: #f6f8fa;
+        padding: 10px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border: 1px solid #ddd;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      #copy-tip {
+        color: green;
+        display: none;
+        font-size: 14px;
+      }
+
+      .toggle-btn {
+        position: absolute;
+        left: 300px;
+        top: 10px;
+        z-index: 10;
+        cursor: pointer;
+      }
+
+      .sidebar.collapsed+.toggle-btn {
+        left: 10px;
+      }
+    </style>
+  </head>
+  <body>
+
+    <div class="sidebar" id="sidebar">
+      <h3>🕘 历史记录</h3>
+      <button onclick="newRecord()">🆕 新建记录</button>
+      <button onclick="clearHistory()">🧹 清空全部</button>
+      <div id="history"></div>
+    </div>
+
+    <div class="toggle-btn" onclick="toggleSidebar()">📚</div>
+
+    <div class="main">
+      <h2>🛠️ MyBatis SQL 日志拼接工具</h2>
+
+      <label>🧱 SQL 模板（Preparing:）</label>
+      <textarea id="sqlInput">SELECT * FROM user WHERE id = ? AND name = ?</textarea>
+
+      <label>🧾 参数列表（Parameters:）</label>
+      <textarea id="paramsInput">123(Integer), John(String)</textarea>
+
+      <div class="row">
+        <button onclick="generateSQL()">生成完整 SQL</button>
+        <button onclick="copyResult()">📋 复制结果</button>
+        <span id="copy-tip">已复制！</span>
+      </div>
+
+      <h3>✅ 结果 SQL：</h3>
+      <pre id="result"></pre>
+    </div>
+
+    <script>
+      const sqlInput = document.getElementById('sqlInput')
+      const paramsInput = document.getElementById('paramsInput')
+      const resultEl = document.getElementById('result')
+      const copyTip = document.getElementById('copy-tip')
+      const historyEl = document.getElementById('history')
+      const HISTORY_KEY = 'mybatis_history_v2'
+      let currentIndex = -1
+
+      function escape(str) {
+        return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      }
+
+      function generateSQL(saveHistory = true) {
+        const sql = sqlInput.value.trim()
+        const paramsRaw = paramsInput.value.trim()
+
+        const params = paramsRaw.split(',').map(p => {
+          const match = p.trim().match(/^(.*)\((\w+)\)$/)
+          if (!match) return p.trim()
+          const val = match[1].trim()
+          const type = match[2].toLowerCase()
+          return ['string', 'date', 'timestamp', 'datetime'].includes(type) ?
+            `'${escape(val)}'` : val
+        })
+
+        let index = 0
+        const finalSQL = sql.replace(/\?/g, () => params[index++] || '?')
+        resultEl.textContent = finalSQL
+
+        const record = {
+          sql,
+          params: paramsRaw,
+          result: finalSQL
+        }
+
+        if (currentIndex >= 0) {
+          updateRecord(currentIndex, record)
+        } else {
+          if (saveHistory) {
+            saveToHistory({
+              ...record,
+              remark: ''
+            })
+          }
+
+          currentIndex = 0
+        }
+
+        renderHistory()
+      }
+
+      function newRecord() {
+        // sqlInput.value = ''
+        // paramsInput.value = ''
+        resultEl.textContent = ''
+        currentIndex = -1
+        renderHistory()
+      }
+
+      function copyResult() {
+        const text = resultEl.textContent
+        navigator.clipboard.writeText(text).then(() => {
+          copyTip.style.display = 'inline'
+          setTimeout(() => (copyTip.style.display = 'none'), 1500)
+        }).catch(() => alert('复制失败，请手动复制'))
+      }
+
+      function saveToHistory(record) {
+        let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+        history.unshift(record)
+        if (history.length > 50) history = history.slice(0, 50)
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+      }
+
+      function updateRecord(index, newData) {
+        let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+        if (history[index]) {
+          history[index] = {
+            ...history[index],
+            ...newData
+          }
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+        }
+      }
+
+      function deleteHistory(index) {
+        let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+        history.splice(index, 1)
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+        if (currentIndex === index) currentIndex = -1
+        else if (currentIndex > index) currentIndex--
+        renderHistory()
+      }
+
+      function updateRemark(index, newRemark) {
+        let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+        if (history[index]) {
+          history[index].remark = newRemark
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+          renderHistory()
+        }
+      }
+
+      function clearHistory() {
+        if (confirm('确认要清空全部历史记录吗？')) {
+          localStorage.removeItem(HISTORY_KEY)
+          currentIndex = -1
+          renderHistory()
+        }
+      }
+
+      function renderHistory() {
+        let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+        historyEl.innerHTML = ''
+        history.forEach((item, index) => {
+          const div = document.createElement('div')
+          div.className = 'history-item'
+          if (index === currentIndex) div.classList.add('selected')
+
+          const title = document.createElement('div')
+          title.className = 'history-title'
+          title.innerText = `[${index + 1}] ${item.sql.slice(0, 30)}...`
+          title.title = item.result
+          title.onclick = () => {
+            sqlInput.value = item.sql
+            paramsInput.value = item.params
+            resultEl.textContent = item.result
+            currentIndex = index
+            renderHistory()
+          }
+
+          const delBtn = document.createElement('button')
+          delBtn.innerText = '🗑️'
+          delBtn.className = 'delete-btn'
+          delBtn.onclick = (e) => {
+            e.stopPropagation()
+            deleteHistory(index)
+          }
+
+          const remarkRow = document.createElement('div')
+          remarkRow.className = 'remark-row'
+          const remarkInput = document.createElement('input')
+          remarkInput.type = 'text'
+          remarkInput.placeholder = '备注...'
+          remarkInput.value = item.remark || ''
+          const saveBtn = document.createElement('button')
+          saveBtn.textContent = '💾'
+          saveBtn.onclick = (e) => {
+            e.stopPropagation()
+            updateRemark(index, remarkInput.value)
+          }
+
+          remarkRow.appendChild(remarkInput)
+          remarkRow.appendChild(saveBtn)
+
+          div.appendChild(title)
+          div.appendChild(delBtn)
+          div.appendChild(remarkRow)
+
+          historyEl.appendChild(div)
+        })
+      }
+
+      function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar')
+        sidebar.classList.toggle('collapsed')
+      }
+
+      renderHistory()
+      generateSQL(false)
+    </script>
+  </body>
+</html>

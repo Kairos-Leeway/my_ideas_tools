@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8"/>
+    <title>记录工具</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+    <script src="https://unpkg.com/element-ui/lib/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vuedraggable@2.24.3/dist/vuedraggable.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css/github-markdown.min.css">
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        #app {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 300px;
+            padding: 10px;
+            border-right: 1px solid #dcdfe6;
+            overflow-y: auto;
+            background: #f5f7fa;
+        }
+
+        .main {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .remark-input {
+            width: 100%;
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .el-button + .el-button,
+        .el-checkbox.is-bordered + .el-checkbox.is-bordered {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h3>📜 历史记录</h3>
+        <div class="button-grid">
+            <el-button size="mini" type="info" size="mini" @click="createGroup">➕新建分组</el-button>
+            <el-button type="danger" icon="el-icon-delete" @click="clearHistory" size="mini" plain>清空</el-button>
+            <el-button icon="el-icon-download" @click="exportData" size="mini" plain>导出备份</el-button>
+            <el-button type="default" icon="el-icon-upload" size="mini" @click="$refs.fileInput.click()">导入恢复</el-button>
+            <input type="file" ref="fileInput" style="display: none" @change="importData" />
+            <el-button type="primary" icon="el-icon-circle-plus" @click="newRecord" size="mini" plain>新建记录</el-button>
+            <el-button type="default" size="mini" @click="drawerVisible = true" size="mini">📊 AI分析</el-button>
+        </div>
+        <el-divider></el-divider>
+
+        <!-- 替换这段 sidebar 中历史记录的展示部分 -->
+        <!--        <div v-for="(item, index) in history" :key="index"-->
+        <!--             style="display: flex; justify-content: space-between; align-items: center;">-->
+        <!--            <div @click="loadHistory(index)" style="cursor: pointer; flex: 1;">-->
+        <!--                [{{ index + 1 }}] {{ item.remark }}-->
+        <!--            </div>-->
+        <!--            <el-button icon="el-icon-delete" size="mini" type="text" @click.stop="deleteHistory(index)"></el-button>-->
+        <!--        </div>-->
+        <div>
+            <el-input
+                    placeholder="输入关键字进行过滤"
+                    v-model="filterText">
+            </el-input>
+            <el-tree
+                    :data="treeData"
+                    :props="treeProps"
+                    node-key="id"
+                    default-expand-all
+                    draggable
+                    @node-click="onTreeNodeClick"
+                    @node-drop="onNodeDrop"
+            >
+              <span class="custom-tree-node" slot-scope="{ node, data }"
+                    style="display: flex; justify-content: space-between; width: 100%;overflow: hidden; align-items: center;">
+                <el-tooltip :content="data.label" placement="right" effect="light">
+                    <span
+                            @dblclick="editTreeLabel(node, data)"
+                            style="cursor: pointer;
+                         display: inline-block;
+                         max-width: 160px;  /* 根据需要调整宽度 */
+                         white-space: nowrap;
+                         overflow: hidden;
+                         text-overflow: ellipsis;"
+                    >
+                  <template v-if="!data.editing">{{ data.label }}</template>
+                  <el-input v-else size="mini" v-model="data.label" @blur="finishEditLabel(data)"
+                            @keyup.enter.native="finishEditLabel(data)"/>
+                </span>
+                </el-tooltip>
+<!--                <span>-->
+<!--                  <el-button v-if="Array.isArray(data.children)" type="text" size="mini" icon="el-icon-plus"-->
+<!--                             @click.stop="addRecordToGroup(data)"></el-button>-->
+<!--                    <el-button-->
+<!--                            v-if="typeof data.recordIndex === 'number'"-->
+<!--                            type="text"-->
+<!--                            size="mini"-->
+<!--                            icon="el-icon-copy-document"-->
+<!--                            @click.stop="copyRecord(data)"-->
+<!--                    ></el-button>-->
+<!--                  <el-button type="text" size="mini" icon="el-icon-delete"-->
+<!--                             @click.stop="deleteTreeNode(data)"></el-button>-->
+
+<!--                </span>-->
+                  <!-- Tree 节点右侧操作按钮 -->
+                <span>
+                  <!-- ➕ 仅用于分组 -->
+                  <el-button
+                          v-if="Array.isArray(data.children)"
+                          type="text"
+                          size="mini"
+                          icon="el-icon-plus"
+                          @click.stop="addRecordToGroup(data)">
+                  </el-button>
+                  <el-button
+                          v-if="typeof data.recordIndex === 'number'"
+                          type="text"
+                          size="mini"
+                          icon="el-icon-copy-document"
+                          @click.stop="copyRecord(data)"
+                  ></el-button>
+                    <!-- 🗑️ 删除按钮加确认 popper -->
+                  <el-popconfirm
+                          title="确认删除此项？"
+                          confirm-button-text="删除"
+                          cancel-button-text="取消"
+                          icon="el-icon-warning"
+                          icon-color="#f56c6c"
+                          @confirm="deleteTreeNode(data)">
+                    <el-button
+                            slot="reference"
+                            type="text"
+                            size="mini"
+                            icon="el-icon-delete"
+                            @click.stop>
+                    </el-button>
+                  </el-popconfirm>
+                </span>
+              </span>
+            </el-tree>
+        </div>
+    </div>
+
+    <!-- Main Table -->
+    <div class="main">
+        <el-input v-model="currentRemark" placeholder="请输入本次记录备注" class="remark-input"
+                  style="margin-bottom: 10px"></el-input>
+        <el-button type="primary" size="mini" @click="columnDrawer = true">列设置</el-button>
+        <el-table height="80vh" :data="tableData" border style="width: 100%; margin-bottom: 10px" :key="tableKey">
+            <el-table-column v-for="(col, index) in columns" :key="col._id" align="center" min-width="200"
+                             :label="col.label"
+                             :prop="col._id">
+                <template slot-scope="scope">
+                    <!-- 文本类型 -->
+                    <el-input v-if="col.type === 'text'" v-model="scope.row[col._id]" size="mini"></el-input>
+
+                    <!-- 多行文本类型 -->
+                    <el-input type="textarea" v-else-if="col.type === 'textarea'" v-model="scope.row[col._id]"
+                              size="mini"
+                              :autosize="{ minRows: 1, maxRows: 10 }"></el-input>
+
+                    <!-- 下拉选择类型 -->
+                    <el-select v-else-if="col.type === 'select'" v-model="scope.row[col._id]" size="mini"
+                               placeholder="请选择"
+                               style="width: 100%">
+                        <el-option v-for="opt in col.options || []" :key="opt" :label="opt" :value="opt"></el-option>
+                    </el-select>
+
+                    <!-- 多标签输入 -->
+                    <div v-else-if="col.type === 'tag'"
+                         style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center;">
+                        <el-tag v-for="(tag, idx) in (scope.row[col._id] || [])" :key="idx" closable
+                                @close="scope.row[col._id].splice(idx, 1)" type="primary">
+                            {{ tag }}
+                        </el-tag>
+                        <el-input v-model="tagInput[col._id + '_' + scope.$index]" size="mini" class="tag-input"
+                                  placeholder="输入标签后回车"
+                                  @keyup.enter.native.prevent="addTag(scope.row, col._id, scope.$index)"
+                                  style="width: 120px;"></el-input>
+                    </div>
+                    <div v-else-if="col.type==='rate'">
+                        <el-rate
+                                v-model="scope.row[col._id]"
+                                :max="5"
+                                text-color="#ff9900"
+                                show-score
+                                allow-half
+                                size="small"
+                        />
+                    </div>
+                    <div v-else-if="col.type==='progress'"
+                         style="width: 100%; align-items:center;">
+
+                        <div style="width: 100%">
+                            <el-progress :percentage="scope.row[col._id]" :color="customColors"></el-progress>
+                        </div>
+                        <div style="">
+                            <el-input-number size="mini" v-model="scope.row[col._id]" :step="5"
+                                             controls-position="right" :min="0" :max="100"></el-input-number>
+                        </div>
+                    </div>
+<!--                     多选框类型-->
+                    <el-checkbox-group v-else-if="col.type === 'checkbox'" v-model="scope.row[col._id]" size="mini">
+                        <el-checkbox style="margin-right: 10px" v-for="opt in col.options || []" :key="opt" :label="opt"
+                                     border>{{ opt }}
+                        </el-checkbox>
+                    </el-checkbox-group>
+
+
+                    <div v-else-if="col.type === 'date'" style="width: 100%">
+                        <!-- date 类型渲染 -->
+                        <el-date-picker
+                                style="width: 80%;"
+                                size="mini"
+                                v-model="scope.row[col._id]"
+                                type="datetime"
+                                placeholder="选择日期时间"
+                                align="right"
+                                :picker-options="pickerOptions">
+                        </el-date-picker>
+                        <div>
+                            {{formatDateTime(scope.row[col._id])}}
+                        </div>
+                    </div>
+                    <!-- 兜底文本输入 -->
+                    <el-input v-else v-model="scope.row[col._id]" size="mini"></el-input>
+                </template>
+            </el-table-column>
+            <el-table-column fixed="right" align="center" label="操作" width="80">
+                <template slot-scope="scope">
+                    <el-button icon="el-icon-delete" size="mini" @click="removeRow(scope.$index)" type="text"/>
+                </template>
+            </el-table-column>
+        </el-table>
+
+        <el-button type="primary" icon="el-icon-plus" @click="addRow" size="mini">添加行</el-button>
+        <el-button type="success" icon="el-icon-check" @click="saveRecord" size="mini">保存</el-button>
+    </div>
+
+    <!-- Drawer: Column Settings -->
+    <el-drawer title="列设置" :visible.sync="columnDrawer" direction="rtl" size="30%">
+        <div style="padding: 10px;">
+            <el-form @submit.native.prevent>
+                <el-form-item label="列名">
+                    <el-input v-model="newColumn.label" placeholder="如：等级"/>
+                </el-form-item>
+                <el-form-item label="类型">
+                    <el-select v-model="newColumn.type" placeholder="请选择类型">
+                        <el-option label="文本" value="text"></el-option>
+                        <el-option label="多行文本" value="textarea"></el-option>
+                        <el-option label="下拉选择" value="select"></el-option>
+                        <el-option label="标签" value="tag"></el-option>
+                        <el-option label="多选框" value="checkbox"></el-option>
+                        <el-option label="星级评分" value="rate"></el-option>
+                        <el-option label="进度条" value="progress"></el-option>
+                        <el-option label="日期" value="date"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item v-if="newColumn.type === 'select'" label="选项（逗号分隔）">
+                    <el-input v-model="newColumn.optionsText" placeholder="例如：红,绿,蓝"/>
+                </el-form-item>
+
+                <el-button type="primary" @click="confirmAddColumn">确认添加</el-button>
+            </el-form>
+
+            <el-divider>当前列（可拖动排序）</el-divider>
+            <!-- 替换 drawer 中 columns 设置的每项展示逻辑 -->
+            <draggable v-model="columns" :options="{ handle: '.drag-handle' }" @end="updateTableKey">
+                <div v-for="(col, i) in columns" :key="col._id"
+                     style="margin-bottom: 5px; display: flex; flex-direction: column; gap: 4px;">
+
+                    <!-- 新增类型显示 -->
+                    <div style="font-size: 12px; color: #909399; user-select: none;">
+                        类型: <strong>{{ typeLabel(col.type) }}</strong>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <el-input v-model="col.label" size="mini" placeholder="列名"
+                                  @blur="validateAndUpdateColumn(i)"></el-input>
+                        <el-button icon="el-icon-rank" type="text" class="drag-handle" size="mini"></el-button>
+                        <el-button icon="el-icon-delete" @click="removeColumn(i)" type="text" size="mini"></el-button>
+                    </div>
+                    <div v-if="col.type === 'select' || col.type === 'checkbox'">
+                        <el-input placeholder="选项（逗号分隔）" v-model="col.optionsText" size="mini"
+                                  @input="updateSelectOptions(i, col.optionsText)"></el-input>
+                    </div>
+                </div>
+            </draggable>
+        </div>
+    </el-drawer>
+    <el-drawer
+            :title="`AI 分析结果, 当前记录:${selectedRecord?.remark || ''}`"
+            :visible.sync="drawerVisible"
+            size="80%"
+            direction="btt"
+    >
+        <div style="padding: 30px">
+            <span>
+                你的条件:
+            </span>
+            <div>
+                <el-input placeholder="请输入, 否则只会发送对应数据给DeepSeek" v-model="condition" type="textarea"></el-input>
+            </div>
+        </div>
+        <el-button :disabled="aiLoading" v-loading="aiLoading" element-loading-text="AI输出中" element-loading-spinner="el-icon-loading" style="margin-left: 30px" type="default" size="mini" @click="analyzeData" size="mini">开始分析</el-button>
+
+        <div class="markdown-body" v-html="renderedMarkdown" style="margin: 30px; padding: 10px; overflow-y: scroll; height: 60vh;border: #909399 1px solid;border-radius: 10px"></div>
+    </el-drawer>
+</div>
+
+<!-- Vue Script -->
+<script>
+    Vue.component("draggable", vuedraggable);
+
+    new Vue({
+        el: "#app",
+        data() {
+            return {
+                groupedHistory: [],
+                currentRecordIndex: null,
+                selectedRecord: null,
+                aiLoading: false,
+                aiResult: '',
+                filterText: '',
+                condition: '',
+                treeData: [],
+                treeProps: {children: 'children', label: 'label'},
+                selectedGroupId: null,
+                columns: [],
+                apiKey: '',
+                newColumn: {
+                    label: "",
+                    type: "text",
+                    optionsText: ""
+                },
+                pickerOptions: {
+                    shortcuts: [{
+                        text: '今天',
+                        onClick(picker) {
+                            picker.$emit('pick', new Date());
+                        }
+                    }, {
+                        text: '昨天',
+                        onClick(picker) {
+                            const date = new Date();
+                            date.setTime(date.getTime() - 3600 * 1000 * 24);
+                            picker.$emit('pick', date);
+                        }
+                    }, {
+                        text: '一周前',
+                        onClick(picker) {
+                            const date = new Date();
+                            date.setTime(date.getTime() - 3600 * 1000 * 24 * 7);
+                            picker.$emit('pick', date);
+                        }
+                    }]
+                },
+                customColors: [
+                    {color: '#f56c6c', percentage: 20},
+                    {color: '#e6a23c', percentage: 40},
+                    {color: '#5cb87a', percentage: 60},
+                    {color: '#1989fa', percentage: 80},
+                    {color: '#6f7ad3', percentage: 100}
+                ],
+                columnDrawer: false,
+                drawerVisible: false,
+                tableData: [],
+                history: [],
+                currentIndex: null,
+                currentRemark: "",
+                storageKey: "dnf_material_history_v3",
+                tagInput: {},
+                progress: 0,
+                tableKey: Date.now()
+            };
+        },
+        computed: {
+            renderedMarkdown() {
+                console.log(window)
+                return window.marked.marked(this.aiResult || '');
+            }
+        },
+        watch: {
+            filterText(val) {
+                this.$refs.tree.filter(val);
+            }
+        },
+        created() {
+            this.loadHistoryFromStorage();
+        },
+        methods: {
+            onNodeDrop(draggingNode, dropNode, dropType, ev) {
+                const dragData = draggingNode.data;
+                const dropData = dropNode.data;
+
+                // 只处理记录节点拖动到分组节点
+                if (typeof dragData.recordIndex === 'number' && dropData.children) {
+                    const fromGroup = this.groupedHistory.find(g => g.id === dragData.groupId);
+                    const toGroup = this.groupedHistory.find(g => g.id === dropData.id);
+                    if (!fromGroup || !toGroup) return;
+
+                    // 取出拖拽记录
+                    const record = fromGroup.children.splice(dragData.recordIndex, 1)[0];
+                    // 插入目标分组末尾
+                    toGroup.children.push(record);
+
+                    this.saveHistoryToStorage();
+                    this.buildTree();
+                    this.$message.success("记录已移动");
+                } else {
+                    this.$message.warning("只允许移动记录到分组");
+                }
+            },
+            copyRecord(data) {
+                const group = this.groupedHistory.find(g => g.id === data.groupId);
+                if (!group) return;
+
+                const record = group.children[data.recordIndex];
+                if (!record) return;
+
+                // 深拷贝记录
+                const newRecord = JSON.parse(JSON.stringify(record));
+
+                // 插入到同一个分组末尾
+                group.children.push(newRecord);
+                newRecord.remark = newRecord.remark?.split("#")[0] + '#' + this.getRandomValues()
+                this.saveHistoryToStorage();
+                this.buildTree();
+                this.$message.success("记录已复制");
+            },
+            filterNode(value, data) {
+                if (!value) return true;
+                return data.label.indexOf(value) !== -1;
+            },
+            createGroup() {
+                const id = 'group_' + Date.now();
+                this.groupedHistory.push({id, name: '新分组', children: []});
+                this.saveHistoryToStorage();
+                this.buildTree();
+            },
+            addRecordToGroup(group) {
+                this.columns = [];
+                this.tableData = [];
+                this.currentRemark = '';
+                this.selectedGroupId = group.id;
+                this.currentRecordIndex = null;  // 新增，标明是新增记录
+            },
+            saveRecord() {
+                if (!this.selectedGroupId) {
+                    this.$message.error("请先选择一个分组");
+                    return;
+                }
+
+                const group = this.groupedHistory.find(g => g.id === this.selectedGroupId);
+                if (!group) return;
+
+                const newRecord = {
+                    remark: this.currentRemark,
+                    columns: JSON.parse(JSON.stringify(this.columns)),
+                    data: JSON.parse(JSON.stringify(this.tableData))
+                };
+
+                if (typeof this.currentRecordIndex === 'number') {
+                    // ✅ 更新已有记录
+                    this.$set(group.children, this.currentRecordIndex, newRecord);
+                    this.$message.success("记录已更新");
+                } else {
+                    // ✅ 新增记录
+                    group.children.push(newRecord);
+                    this.$message.success("记录已保存到分组");
+                }
+
+                this.saveHistoryToStorage();
+                this.buildTree();
+            },
+            addColumn() {
+                const id = 'col_' + Date.now();
+                const label = prompt("请输入列名", "列");
+                if (!label) return;
+                this.columns.push({id, label});
+                this.tableData.forEach(row => this.$set(row, id, ''));
+            },
+            addRow() {
+                // const row = {};
+                // this.columns.forEach(c => row[c.id] = '');
+                this.tableData.push(this.emptyRow());
+                // this.emptyRow()
+            },
+            buildTree() {
+                this.treeData = this.groupedHistory.map(group => ({
+                    id: group.id,
+                    label: group.name,
+                    editing: false,
+                    children: group.children.map((rec, idx) => ({
+                        id: group.id + '_rec_' + idx,
+                        label: `[${idx + 1}] ${rec.remark || '未命名'}`,
+                        groupId: group.id,
+                        recordIndex: idx
+                    }))
+                }));
+            },
+            onTreeNodeClick(data) {
+                if (typeof data.recordIndex === 'number') {
+                    const group = this.groupedHistory.find(g => g.id === data.groupId);
+                    const record = group?.children[data.recordIndex];
+                    if (!record) return;
+                    this.columns = JSON.parse(JSON.stringify(record.columns));
+                    this.tableData = JSON.parse(JSON.stringify(record.data));
+                    this.currentRemark = record.remark;
+                    this.selectedGroupId = group.id;
+                    this.currentRecordIndex = data.recordIndex; // 设置当前正在编辑的记录索引
+                    this.selectedRecord = record; // ✅ 新增这句
+                } else {
+                    this.selectedGroupId = data.id;
+                    this.currentRecordIndex = null; // 不是记录，只是点击了分组
+                }
+            },
+            deleteTreeNode(data) {
+                if (typeof data.recordIndex === 'number') {
+                    const group = this.groupedHistory.find(g => g.id === data.groupId);
+                    group?.children.splice(data.recordIndex, 1);
+                } else {
+                    this.groupedHistory = this.groupedHistory.filter(g => g.id !== data.id);
+                }
+                this.saveHistoryToStorage();
+                this.buildTree();
+            },
+            editTreeLabel(node, data) {
+                if (!data.children) {
+                    return
+                }
+                this.$set(data, 'editing', true);
+            },
+            finishEditLabel(data) {
+                data.editing = false;
+                const group = this.groupedHistory.find(g => g.id === data.id);
+                if (group) group.name = data.label;
+                this.saveHistoryToStorage();
+            },
+            saveHistoryToStorage() {
+                localStorage.setItem(this.storageKey, JSON.stringify(this.groupedHistory));
+            },
+            loadHistoryFromStorage() {
+                try {
+                    this.groupedHistory = JSON.parse(localStorage.getItem(this.storageKey) || '[]');
+                    this.buildTree();
+                } catch {
+                    this.groupedHistory = [];
+                }
+            },
+            typeLabel(type) {
+                const map = {
+                    text: "文本",
+                    textarea: "多行文本",
+                    select: "下拉选择",
+                    tag: "标签",
+                    progress: "进度条",
+                    rate: "星级评分",
+                    date: "日期时间",
+                    checkbox: "多选框"
+                };
+                return map[type] || "未知类型";
+            },
+            updateTableKey() {
+                this.tableKey = Date.now(); // 每次设置一个不同的 key 值触发重新渲染
+            },
+            addTag(row, colId, rowIndex) {
+                const key = colId + "_" + rowIndex;
+                let val = this.tagInput[key];
+                if (!val) return;
+                val = val.trim();
+                if (!val) return;
+
+                if (!Array.isArray(row[colId])) {
+                    this.$set(row, colId, []);
+                }
+                if (!row[colId].includes(val)) {
+                    row[colId].push(val);
+                }
+                this.$set(this.tagInput, key, "");
+            },
+            generateColId() {
+                return 'col_' + this.getRandomValues();
+            },
+            getRandomValues() {
+                return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
+            },
+            newRecord() {
+                this.columns.splice(0);
+                this.tableData.splice(0);
+                this.currentIndex = null;
+                this.currentRemark = "";
+                this.tagInput = {};
+            },
+            removeRow(index) {
+                this.tableData.splice(index, 1);
+                Object.keys(this.tagInput).forEach(key => {
+                    if (key.endsWith('_' + index)) {
+                        delete this.tagInput[key];
+                    }
+                });
+            },
+            confirmAddColumn() {
+                const label = this.newColumn.label.trim();
+                if (!label) return;
+                if (this.columns.find((c) => c.label === label)) {
+                    this.$message.error("列名不能重复");
+                    return;
+                }
+                const id = this.generateColId();
+                const type = this.newColumn.type || "text";
+                const column = {
+                    label,
+                    type,
+                    _id: id
+                };
+                if (type === "select" || type === "checkbox") {
+                    column.options = this.newColumn.optionsText.split(",").map((s) => s.trim()).filter((s) => s);
+                    column.optionsText = this.newColumn.optionsText;
+                }
+                this.columns.push(column);
+
+                this.tableData.forEach(row => {
+                    if (column.type === 'tag' || column.type === 'checkbox') {
+                        this.$set(row, id, []);
+                    } else if (column.type === 'rate' || column.type === 'progress') {
+                        this.$set(row, id, 0);
+                    } else {
+                        this.$set(row, id, "");
+                    }
+                });
+
+                this.newColumn = {
+                    label: "",
+                    type: "text",
+                    optionsText: ""
+                };
+            },
+            removeColumn(index) {
+                const col = this.columns[index];
+                this.columns.splice(index, 1);
+                this.tableData.forEach((row) => {
+                    this.$delete(row, col._id);
+                });
+            },
+            emptyRow() {
+                const row = {};
+                this.columns.forEach((col) => {
+                    if (col.type === 'tag' || col.type === 'checkbox') {
+                        row[col._id] = [];
+                    } else if (col.type === 'select') {
+                        row[col._id] = ""; // 下拉默认空字符串
+                    } else if (col.type === 'rate' || col.type === 'progress') {
+                        row[col._id] = 0;
+                    } else {
+                        row[col._id] = ""; // 其他类型默认空字符串
+                    }
+
+
+                });
+                return row;
+            },
+
+            syncOptionsTextToColumns() {
+                this.columns.forEach(col => {
+                    if (col.type === 'select' || col.type === 'checkbox') {
+                        col.optionsText = (col.options || []).join(',');
+                    }
+                });
+            },
+
+            formatDateTime(isoString) {
+                if (!isoString) {
+                    return "";
+                }
+                const date = new Date(isoString)
+
+                const pad = n => n.toString().padStart(2, '0')
+
+                const year = date.getFullYear()
+                const month = pad(date.getMonth() + 1)
+                const day = pad(date.getDate())
+                const hours = pad(date.getHours())
+                const minutes = pad(date.getMinutes())
+                const seconds = pad(date.getSeconds())
+
+                return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+            },
+            clearHistory() {
+                this.$confirm(
+                    '此操作将清空所有历史记录，且无法恢复。请确认是否已完成数据备份？',
+                    '警告',
+                    {
+                        confirmButtonText: '我已备份，清空',
+                        cancelButtonText: '取消',
+                        type: 'warning'
+                    }
+                ).then(() => {
+                    this.groupedHistory = [];
+                    this.treeData = [];
+                    this.columns = [];
+                    this.tableData = [];
+                    this.currentRemark = '';
+                    this.selectedGroupId = null;
+                    this.saveHistoryToStorage();
+                    this.$message.success('历史记录已清空');
+                }).catch(() => {
+                    this.$message.info('已取消清除');
+                });
+            },
+            exportData() {
+                const dataStr = JSON.stringify(this.groupedHistory, null, 2);
+                const blob = new Blob([dataStr], {
+                    type: "application/json"
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `diy_record_data_backup_${this.formatDateTime(new Date().getTime())}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            },
+            importData(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const imported = JSON.parse(event.target.result);
+                        if (!Array.isArray(imported)) {
+                            this.$message.error("导入的数据格式不正确");
+                            return;
+                        }
+
+                        this.groupedHistory = imported;
+                        this.saveHistoryToStorage();
+                        this.buildTree();
+                        this.$message.success("导入成功");
+
+                    } catch (err) {
+                        this.$message.error("导入失败，文件可能不是有效的 JSON");
+                    }
+                };
+                reader.readAsText(file);
+                // 清空 input 的值，避免重复导入同一个文件不会触发 change 事件
+                e.target.value = null;
+            },
+            // summarize(data) {
+            //     if (!data || !data.length) return "";
+            //     const firstRow = data[0];
+            //     if (!firstRow) return "";
+            //     const firstKey = Object.keys(firstRow)[0];
+            //     if (!firstKey) return "";
+            //     return firstRow[firstKey];
+            // },
+            // handleTagEnter(row, colId, rowIndex) {
+            //     const key = colId + "_" + rowIndex;
+            //     let val = this.tagInput[key];
+            //     if (!val) return;
+            //     val = val.trim();
+            //     if (!val) return;
+            //     this.$set(row, colId, val);
+            //     this.$set(this.tagInput, key, "");
+            // },
+            validateAndUpdateColumn(index) {
+                const col = this.columns[index];
+                if (!col.label.trim()) {
+                    this.$message.error("列名不能为空");
+                    col.label = "未命名列";
+                }
+                const duplicates = this.columns.filter((c, i) => c.label === col.label && i !== index);
+                if (duplicates.length) {
+                    this.$message.error("列名不能重复");
+                    col.label = col.label + "(重复)";
+                }
+            },
+            updateSelectOptions(index, optionsText) {
+                this.columns[index].options = optionsText.replace("，", ",").split(",").map(s => s.trim()).filter(s => s);
+            },
+            async analyzeData0() {
+                if (!this.selectedRecord) {
+                    this.$message.warning("请先选择一个记录");
+                    return;
+                }
+
+                const { columns, data } = this.selectedRecord;
+
+                const rows = data.map((row, i) => {
+                    const rowStr = columns.map(col => `${col.label}: ${row[col._id]}`).join(', ');
+                    return `第 ${i + 1} 行：${rowStr}`;
+                }).join('\n');
+
+                const prompt = `请对以下记录数据进行分析，并给出趋势和建议：\n${rows}`;
+
+                try {
+                    const res = await axios.post('https://api.deepseek.com/chat/completions', {
+                        model: 'deepseek-chat',
+                        messages: [
+                            { role: 'user', content: prompt }
+                        ]
+                    }, {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.apiKey}`
+                        }
+                    });
+
+                    const reply = res.data.choices?.[0]?.message?.content;
+                    this.aiResult = reply || "无内容返回";
+                } catch (err) {
+                    console.error(err);
+                    this.$message.error("AI 分析失败");
+                }
+            },
+            async analyzeData() {
+                if (!this.selectedRecord) {
+                    this.$message.warning("请先选择一个记录");
+                    return;
+                }
+                this.aiLoading = true;
+
+                const { columns, data } = this.selectedRecord;
+                const rows = data.map((row, i) => {
+                    const rowStr = columns.map(col => `${col.label}: ${row[col._id]}`).join(', ');
+                    return `第 ${i + 1} 行：${rowStr}`;
+                }).join('\n');
+
+                const prompt = `请对以下记录数据进行分析：\n${rows}`;
+
+                this.aiResult = "分析中，请稍候...\n"; // 清空旧内容
+                try {
+                    const res = await fetch("https://api.deepseek.com/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${this.apiKey}`,
+                            "Accept": "text/event-stream"
+                        },
+                        body: JSON.stringify({
+                            model: "deepseek-chat",
+                            stream: true,
+                            messages: [{ role: "user", content: prompt },
+                                { role: "user", content: this.condition }]
+                        })
+                    });
+
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder("utf-8");
+                    let partial = "";
+                    this.aiResult = ''
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) {
+                            this.aiLoading = false
+                            break;
+                        }
+
+                        const chunk = decoder.decode(value, { stream: true });
+                        partial += chunk;
+
+                        // 解析 SSE 事件
+                        const lines = partial.split('\n');
+                        partial = lines.pop(); // incomplete line cache
+
+                        for (let line of lines) {
+                            if (line.startsWith("data: ")) {
+                                const payload = line.slice(6).trim();
+                                if (payload === "[DONE]") break;
+
+                                const json = JSON.parse(payload);
+                                const delta = json.choices?.[0]?.delta?.content;
+                                if (delta) {
+                                    this.aiResult += delta; // 增量追加
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error(err);
+                    this.$message.error("AI流式分析失败");
+                }
+            }
+        }
+    });
+</script>
+</body>
+</html>
