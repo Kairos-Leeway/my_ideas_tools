@@ -61,12 +61,11 @@
         <h3>📜 历史记录</h3>
         <div class="button-grid">
             <el-button size="mini" type="info" size="mini" @click="createGroup">➕新建分组</el-button>
-            <el-button type="danger" icon="el-icon-delete" @click="clearHistory" size="mini" plain>清空</el-button>
+            <el-button type="default" size="mini" @click="drawerVisible = true" size="mini">📊 AI分析</el-button>
             <el-button icon="el-icon-download" @click="exportData" size="mini" plain>导出备份</el-button>
             <el-button type="default" icon="el-icon-upload" size="mini" @click="$refs.fileInput.click()">导入恢复</el-button>
             <input type="file" ref="fileInput" style="display: none" @change="importData" />
-            <el-button type="primary" icon="el-icon-circle-plus" @click="newRecord" size="mini" plain>新建记录</el-button>
-            <el-button type="default" size="mini" @click="drawerVisible = true" size="mini">📊 AI分析</el-button>
+            <el-button type="danger" icon="el-icon-delete" @click="clearHistory" size="mini" plain>清空</el-button>
         </div>
         <el-divider></el-divider>
 
