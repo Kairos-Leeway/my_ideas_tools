@@ -83,11 +83,13 @@
                     v-model="filterText">
             </el-input>
             <el-tree
+                    ref="tree"
                     :data="treeData"
                     :props="treeProps"
                     node-key="id"
                     default-expand-all
                     draggable
+                    :filter-node-method="filterNode"
                     @node-click="onTreeNodeClick"
                     @node-drop="onNodeDrop"
             >
