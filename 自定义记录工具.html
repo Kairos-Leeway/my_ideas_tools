@@ -250,6 +250,8 @@
             </el-table-column>
             <el-table-column fixed="right" align="center" label="操作" width="80">
                 <template slot-scope="scope">
+                    <el-button :disabled="scope.$index === 0" icon="el-icon-top" size="mini" @click.stop="moveRow(scope.$index, 'up')" type="text"/>
+                    <el-button :disabled="scope.$index === tableData.length - 1" icon="el-icon-bottom" size="mini" @click.stop="moveRow(scope.$index, 'down')" type="text"/>
                     <el-button icon="el-icon-delete" size="mini" @click="removeRow(scope.$index)" type="text"/>
                 </template>
             </el-table-column>
@@ -312,20 +314,46 @@
     <el-drawer
             :title="`AI 分析结果, 当前记录:${selectedRecord?.remark || ''}`"
             :visible.sync="drawerVisible"
-            size="80%"
+            size="90%"
             direction="btt"
     >
-        <div style="padding: 30px">
-            <span>
-                你的条件:
-            </span>
-            <div>
-                <el-input placeholder="请输入, 否则只会发送对应数据给DeepSeek" v-model="condition" type="textarea"></el-input>
-            </div>
-        </div>
-        <el-button :disabled="aiLoading" v-loading="aiLoading" element-loading-text="AI输出中" element-loading-spinner="el-icon-loading" style="margin-left: 30px" type="default" size="mini" @click="analyzeData" size="mini">开始分析</el-button>
 
-        <div class="markdown-body" v-html="renderedMarkdown" style="margin: 30px; padding: 10px; overflow-y: scroll; height: 60vh;border: #909399 1px solid;border-radius: 10px"></div>
+        <div style="padding: 30px">
+            <el-form size="mini" label-width="80px">
+                <el-row>
+                    <el-col :span="6">
+                        <el-form-item label="AI类型">
+                            <el-select v-model="ai.path" placeholder="请选择类型">
+                                <el-option v-for="item in aiType" :label="item.name" :value="item.url"></el-option>
+                            </el-select>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="6">
+
+                       <el-form-item label="API-Key">
+                           <el-input v-model="ai.key"></el-input>
+                       </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-row>
+                    <el-col :span="24">
+                        <el-form-item label="对话内容">
+                            <el-input placeholder="请输入, 否则只会发送对应数据给DeepSeek;  暂不支持多轮对话" v-model="condition" type="textarea"></el-input>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-row>
+                    <el-col :span="24">
+                        <el-form-item>
+                            </el-form-item>
+                    </el-col>
+                </el-row>
+            </el-form>
+            <el-button :disabled="aiLoading" v-loading="aiLoading" element-loading-text="AI输出中" element-loading-spinner="el-icon-loading" style="margin-left: 30px" type="default" size="mini" @click="analyzeData" size="mini">开始分析</el-button>
+            <div class="markdown-body" v-html="renderedMarkdown" style="margin: 30px; padding: 10px; overflow-y: scroll; height: 50vh;border: #909399 1px solid;border-radius: 10px"></div>
+
+        </div>
+
     </el-drawer>
 </div>
 
@@ -345,6 +373,16 @@
                 filterText: '',
                 condition: '',
                 treeData: [],
+                aiType: [
+                    {
+                        name: 'DeepSeek',
+                        url: 'https://api.deepseek.com/chat/completions'
+                    }
+                ],
+                ai: {
+                  path: 'DeepSeek',
+                  key: ''
+                },
                 treeProps: {children: 'children', label: 'label'},
                 selectedGroupId: null,
                 columns: [],
@@ -472,6 +510,7 @@
                     return;
                 }
 
+                debugger
                 const group = this.groupedHistory.find(g => g.id === this.selectedGroupId);
                 if (!group) return;
 
@@ -532,8 +571,8 @@
                     this.currentRecordIndex = data.recordIndex; // 设置当前正在编辑的记录索引
                     this.selectedRecord = record; // ✅ 新增这句
                 } else {
-                    this.selectedGroupId = data.id;
-                    this.currentRecordIndex = null; // 不是记录，只是点击了分组
+                    // this.selectedGroupId = data.id;
+                    // this.currentRecordIndex = null; // 不是记录，只是点击了分组
                 }
             },
             deleteTreeNode(data) {
@@ -612,6 +651,17 @@
                 this.currentIndex = null;
                 this.currentRemark = "";
                 this.tagInput = {};
+            },
+            moveRow(index, direction) {
+                const data = [...this.tableData]; // 新数组替换引用
+
+                if (direction === 'up' && index > 0) {
+                    [data[index - 1], data[index]] = [data[index], data[index - 1]];
+                } else if (direction === 'down' && index < data.length - 1) {
+                    [data[index], data[index + 1]] = [data[index + 1], data[index]];
+                }
+
+                this.tableData = data; // 替换引用触发视图更新
             },
             removeRow(index) {
                 this.tableData.splice(index, 1);
@@ -823,7 +873,7 @@
                     }, {
                         headers: {
                             'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${this.apiKey}`
+                            'Authorization': `Bearer ${this.ai.key}`
                         }
                     });
 
@@ -851,11 +901,11 @@
 
                 this.aiResult = "分析中，请稍候...\n"; // 清空旧内容
                 try {
-                    const res = await fetch("https://api.deepseek.com/chat/completions", {
+                    const res = await fetch(this.ai.path, {
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
-                            "Authorization": `Bearer ${this.apiKey}`,
+                            "Authorization": `Bearer ${this.ai.key}`,
                             "Accept": "text/event-stream"
                         },
                         body: JSON.stringify({
@@ -899,6 +949,7 @@
                     }
                 } catch (err) {
                     console.error(err);
+                    this.aiLoading = false
                     this.$message.error("AI流式分析失败");
                 }
             }
