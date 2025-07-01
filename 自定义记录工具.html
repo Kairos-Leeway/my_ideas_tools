@@ -221,27 +221,52 @@
                                              controls-position="right" :min="0" :max="100"></el-input-number>
                         </div>
                     </div>
-<!--                     多选框类型-->
-                    <el-checkbox-group v-else-if="col.type === 'checkbox'" v-model="scope.row[col._id]" size="mini">
-                        <el-checkbox style="margin-right: 10px" v-for="opt in col.options || []" :key="opt" :label="opt"
-                                     border>{{ opt }}
+                    <div v-else-if="col.type === 'checkbox'">
+                        <!-- 全选 -->
+                        <el-checkbox
+                                style="margin-right: 10px"
+                                border
+                                size="mini"
+                                :key="Math.random()"
+                                :indeterminate="isIndeterminate(col, scope.row)"
+                                :checked="isAllChecked(col, scope.row)"
+                                @change="handleCheckAll($event, col, scope.row)"
+                        >
+                            全选
                         </el-checkbox>
-                    </el-checkbox-group>
+                        <el-checkbox-group v-model="scope.row[col._id]" size="mini">
+
+                            <el-checkbox style="margin: 2px" v-for="opt in col.options || []" :key="opt" :label="opt"
+                                         border>{{ opt }}
+                            </el-checkbox>
+                        </el-checkbox-group>
+                    </div>
 
 
                     <div v-else-if="col.type === 'date'" style="width: 100%">
-                        <!-- date 类型渲染 -->
-                        <el-date-picker
-                                style="width: 80%;"
-                                size="mini"
-                                v-model="scope.row[col._id]"
-                                type="datetime"
-                                placeholder="选择日期时间"
-                                align="right"
-                                :picker-options="pickerOptions">
-                        </el-date-picker>
-                        <div>
-                            {{formatDateTime(scope.row[col._id])}}
+                        <div style="display: flex; justify-content: center; align-items: center">
+                            <div style="margin: 10px">
+                                <!-- 隐藏 DatePicker -->
+                                <el-date-picker
+                                        :ref="'picker_' + scope.$index"
+                                        v-model="scope.row[col._id]"
+                                        type="datetime"
+                                        style="width: 0; height: 0; opacity: 0; position: absolute; pointer-events: none;"
+                                        popper-class="hidden-picker-popper"
+                                ></el-date-picker>
+
+                                <!-- 触发按钮 -->
+                                <el-button
+                                        icon="el-icon-date"
+                                        size="mini"
+                                        circle
+                                        @click="openPicker(scope.$index)"
+                                        style="margin-left: 15px"
+                                ></el-button>
+                            </div>
+                            <div>
+                                {{formatDateTime(scope.row[col._id])}}
+                            </div>
                         </div>
                     </div>
                     <!-- 兜底文本输入 -->
@@ -369,6 +394,7 @@
                 currentRecordIndex: null,
                 selectedRecord: null,
                 aiLoading: false,
+                pickerVisible: false,
                 aiResult: '',
                 filterText: '',
                 condition: '',
@@ -448,6 +474,38 @@
             this.loadHistoryFromStorage();
         },
         methods: {
+            openPicker(index) {
+                const picker = this.$refs['picker_' + index];
+                // 由于 ref 是数组，也要判断是不是取到了对应组件
+                if (Array.isArray(picker)) {
+                    picker[0].showPicker();
+                } else if (picker && picker.showPicker) {
+                    picker.showPicker();
+                } else {
+                    console.warn('无法打开时间选择器：组件未初始化或 ref 错误');
+                }
+            },
+            // 是否全部选中
+            isAllChecked(col, row) {
+                const selected = row[col._id] || [];
+                return selected.length === (col.options || []).length;
+            },
+
+            // 是否部分选中
+            isIndeterminate(col, row) {
+                const selected = row[col._id] || [];
+                return selected.length > 0 && selected.length < (col.options || []).length;
+            },
+
+            // 处理全选点击
+            handleCheckAll(checked, col, row) {
+                if (checked) {
+                    this.$set(row, col._id, [...col.options]); // 全选
+                } else {
+                    this.$set(row, col._id, []); // 清空
+                }
+
+            },
             onNodeDrop(draggingNode, dropNode, dropType, ev) {
                 const dragData = draggingNode.data;
                 const dropData = dropNode.data;
@@ -510,7 +568,6 @@
                     return;
                 }
 
-                debugger
                 const group = this.groupedHistory.find(g => g.id === this.selectedGroupId);
                 if (!group) return;
 
